@@ -22,7 +22,7 @@ class ServerStatsController extends AppController {
      * So it has been decided for now to just let everyone read it.
      
     global $user;
-    $canView = (!$user) || ($user['System'] != 'None');
+    $canView = (!$user) || ($user->System() != 'None');
     if ( !$canView ) {
       throw new UnauthorizedException(__('Insufficient Privileges'));
       return;
@@ -38,8 +38,17 @@ class ServerStatsController extends AppController {
   public function index() {
     $this->ServerStat->recursive = 0;
     
-    $options = '';
-    $stats = $this->ServerStat->find('all', $options);
+    $named_params = $this->request->params['named'];
+    if ( $named_params ) {
+      $this->FilterComponent = $this->Components->load('Filter');
+      $conditions = $this->FilterComponent->buildFilter($named_params);
+    } else {
+      $conditions = array();
+    }
+
+    $stats = $this->ServerStat->find('all', ['conditions'=>$conditions,
+      'order' => array('TimeStamp ASC'),
+    ]);
 		$this->set(array(
 					'serverstats' => $stats,
 					'_serialize' => array('serverstats')
@@ -80,7 +89,7 @@ class ServerStatsController extends AppController {
   public function add() {
     if ( $this->request->is('post') ) {
       global $user;
-      $canEdit = (!$user) || ($user['System'] == 'Edit');
+      $canEdit = (!$user) || ($user->System() == 'Edit');
       if (!$canEdit) {
         throw new UnauthorizedException(__('Insufficient privileges'));
         return;
@@ -104,7 +113,7 @@ class ServerStatsController extends AppController {
     $this->ServerStat->id = $id;
 
     global $user;
-    $canEdit = (!$user) || ($user['System'] == 'Edit');
+    $canEdit = (!$user) || ($user->System() == 'Edit');
     if ( !$canEdit ) {
       throw new UnauthorizedException(__('Insufficient privileges'));
       return;
@@ -134,7 +143,7 @@ class ServerStatsController extends AppController {
  */
   public function delete($id = null) {
     global $user;
-    $canEdit = (!$user) || ($user['System'] == 'Edit');
+    $canEdit = (!$user) || ($user->System() == 'Edit');
     if ( !$canEdit ) {
       throw new UnauthorizedException(__('Insufficient privileges'));
       return;

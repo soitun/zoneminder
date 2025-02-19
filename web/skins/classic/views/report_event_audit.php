@@ -19,10 +19,11 @@
 //
 
 $navbar = getNavBarHTML();
-ob_start();
 include('_monitor_filters.php');
-$filterbar = ob_get_contents();
-ob_end_clean();
+$resultMonitorFilters = buildMonitorsFilters();
+$filterbar = $resultMonitorFilters['filterBar'];
+$displayMonitors = $resultMonitorFilters['displayMonitors'];
+$selected_monitor_ids = $resultMonitorFilters['selected_monitor_ids'];
 
 if ( isset($_REQUEST['minTime']) ) {
   $minTime = validHtmlStr($_REQUEST['minTime']);
@@ -42,6 +43,8 @@ if ( isset($_REQUEST['maxTime']) ) {
 } else {
   $maxTime = date('Y-m-d H:i:s', time() - 3600);
 }
+
+$group_id = isset($_SESSION['GroupId']) ? $_SESSION['GroupId'] : null;
 
 $filter = new ZM\Filter();
 $filter->addTerm(array('attr'=>'StartDateTime', 'op'=>'>=', 'val'=>$minTime, 'obr'=>'1'));
@@ -69,8 +72,8 @@ $eventsSql = 'SELECT *,
   FROM Events AS E
   WHERE 1 > 0 
 ';
-if ( !empty($user['MonitorIds']) ) {
-  $eventsSql .= ' AND MonitorId IN ('.$user['MonitorIds'].')';
+if ( count($user->unviewableMonitorIds()) ) {
+  $eventsSql .= ' AND MonitorId IN ('.implode(',', $user->viewableMonitorIds()).')';
 }
 if ( count($selected_monitor_ids) ) {
   $eventsSql .= ' AND MonitorId IN ('.implode(',', $selected_monitor_ids).')';
