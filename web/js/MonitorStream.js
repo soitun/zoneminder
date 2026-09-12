@@ -2201,7 +2201,14 @@ function MonitorStream(monitorData) {
       // in fact resumed looks frozen. refs #4706
       this.writeTextInfoBlock("");
     } else if (srcAuthCurrent && (-1 != stream.src.indexOf('mode=paused'))) {
-      // Initial page load has zms with mode=paused, auth is still valid
+      // Initial page load has zms with mode=paused, auth is still valid.
+      // started has to be set first here for the same reason as the resume
+      // branch above: streamCommand() drops anything sent while !started, and
+      // the tail of this function does not set it until after this runs, so the
+      // CMD_PLAY went nowhere and the stream stayed paused. With auth on this
+      // needed a still-valid hash to reach; with auth off, where there is no
+      // hash to go stale, it is reached on every initial load. refs #4706
+      this.started = true;
       this.streamCmdTimer = setInterval(this.streamCmdQuery.bind(this), statusRefreshTimeout);
       this.streamCommand(CMD_PLAY);
     } else {
