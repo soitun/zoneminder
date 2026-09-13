@@ -6,9 +6,13 @@ macOS
 What this covers
 ----------------
 
-ZoneMinder builds, installs and runs on macOS from source. There is no package
-and no Homebrew formula yet, so everything here is manual, and there is no
-launchd job — you start the daemons yourself or write your own plist.
+ZoneMinder builds, installs and runs on macOS from source. There is no package,
+so everything here is manual.
+
+These steps have been run through on Apple Silicon to a working system: capture
+from a network source, motion detection, events recorded to disk, and the web
+interface serving its console. Treat it as a development and evaluation
+platform rather than something to put cameras behind — see the gaps at the end.
 
 Two prefixes are in play and it is worth keeping them apart. Homebrew's prefix
 is where the dependencies come from — ``/opt/homebrew`` on Apple Silicon,
@@ -182,7 +186,22 @@ you do it yourself, once:
                             /usr/local/var/lib/zoneminder
 
 ``_www`` is the account macOS runs its web server as, and is what configure
-detects. Mapped memory files live in ``/usr/local/var/run/zm`` rather than
+detects.
+
+Whatever account you choose, **ZoneMinder has to be started as that account**.
+``zmpkg.pl`` compares the current user against ``ZM_WEB_USER`` and, when they
+differ, tries ``sudo -u``, then two forms of ``su``, to become it. Run it as
+yourself against a configured user of ``_www`` and all three fail — ``su`` needs
+root and ``sudo`` wants a password — and it stops with ``Unable to find valid su
+syntax``. On Linux systemd sidesteps this by starting the unit as the web user;
+the launchd job below does the same.
+
+So either start it under launchd, or run everything as one account. For a
+workstation install the simpler option is to set ``ZM_WEB_USER`` and
+``ZM_WEB_GROUP`` in ``/usr/local/etc/zm/zm.conf`` to your own account and group,
+point a web server that runs as you at it, and own the directories above
+yourself. ``zms`` reads the mapped memory that ``zmc`` writes, so the capture
+daemons and the web server must agree on the account either way. Mapped memory files live in ``/usr/local/var/run/zm`` rather than
 ``/dev/shm``, which macOS does not have. That directory is on disk, not a RAM
 filesystem — macOS mounts no tmpfs — so expect more disk traffic than the same
 setup on Linux.
@@ -190,16 +209,31 @@ setup on Linux.
 Database
 --------
 
+A Homebrew MariaDB authenticates ``root`` with the ``unix_socket`` plugin, so
+``mysql -u root`` is refused — only the operating system's root user matches it.
+Your own account gets an administrative account instead, which is what ``mariadb``
+with no ``-u`` uses:
+
 ::
 
     brew services start mariadb
-    mysql -u root < /usr/local/share/zoneminder/db/zm_create.sql
-    mysql -u root -e "CREATE USER IF NOT EXISTS 'zmuser'@localhost IDENTIFIED BY 'zmpass';"
-    mysql -u root -e "GRANT LOCK TABLES, ALTER, SELECT, INSERT, UPDATE, DELETE, CREATE, INDEX ON zm.* TO 'zmuser'@localhost;"
-    sudo zmupdate.pl --nointeractive
+    mariadb < /usr/local/share/zoneminder/db/zm_create.sql
+    mariadb -e "CREATE USER IF NOT EXISTS 'zmuser'@localhost IDENTIFIED BY 'zmpass';"
+    mariadb -e "GRANT LOCK TABLES, ALTER, SELECT, INSERT, UPDATE, DELETE, CREATE, INDEX ON zm.* TO 'zmuser'@localhost;"
+    zmupdate.pl --nointeractive
 
 Change the user and password from the defaults, in the grant above and in
 ``/usr/local/etc/zm/zm.conf``, before putting this anywhere reachable.
+
+.. note::
+   ``zmupdate.pl`` does not use ``DBI`` for schema changes; it shells out to a
+   client binary, picking ``mariadb`` over ``mysql`` when one is on ``PATH``.
+   The Perl scripts run under ``-T`` and set a taint-safe
+   ``PATH`` of ``/bin:/usr/bin:/usr/local/bin``, so on Apple Silicon, where
+   Homebrew is ``/opt/homebrew``, neither client is found and the upgrade fails
+   with ``sh: mysql: command not found``. Until that path is configurable, add
+   the Homebrew prefix to the ``$ENV{PATH}`` line near the top of
+   ``zmupdate.pl``, or symlink ``mariadb`` into ``/usr/local/bin``.
 
 Web server
 ----------
@@ -211,6 +245,17 @@ neither is installed, and both need adapting to how your web server is set up.
 
 Whichever you choose, it needs PHP, CGI enabled for ``nph-zms``, and rewrite
 rules for the API. The sample files show all three.
+
+The CGI part decides which server is less work. ``zms`` is a CGI binary, and
+Apache runs those directly with ``mod_cgi``; nginx cannot, and needs a wrapper
+such as ``fcgiwrap``, which Homebrew does not package. With nginx and no wrapper
+the interface loads and the console works, but live streams and event playback
+do not.
+
+The samples are also written for the Linux layout and need editing here. The
+nginx one expects certificates under ``/etc/pki``, ``fastcgi_params`` under
+``/etc/nginx`` and an ``fcgiwrap`` socket at ``/run/fcgiwrap.sock``, none of
+which exist on macOS.
 
 Starting ZoneMinder
 -------------------
@@ -267,3 +312,10 @@ Known gaps
 - Configure warns that it cannot find ``arp-scan`` and ``ip``. Neither is fatal:
   ``brew install arp-scan`` covers the first, and ``ip`` is a Linux tool that
   macOS has no equivalent of, so monitor probing is a little less capable.
+- The taint-safe ``PATH`` the Perl scripts set is hardcoded to
+  ``/bin:/usr/bin:/usr/local/bin`` in seventeen files, so anything they shell out
+  to has to be in one of those. Apple Silicon's Homebrew prefix is not, which is
+  what breaks ``zmupdate.pl`` above. The same would affect a ``--prefix=/opt``
+  install on Linux.
+- ``Sys::CPU``, which ``zmtelemetry.pl`` uses, has been removed from CPAN and
+  cannot be installed at all. Telemetry is the only thing affected.
